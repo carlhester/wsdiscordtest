@@ -26,8 +26,8 @@ type Payload struct {
 }
 
 type Heartbeat struct {
-	op int         `json:"op"`
-	d  interface{} `json:"d"`
+	Op int         `json:"op"`
+	D  interface{} `json:"d"`
 }
 
 type Identify struct {
@@ -56,33 +56,68 @@ func main() {
 
 	c, _, err := websocket.DefaultDialer.Dial(u.String(), http.Header{"Authorization": []string{config.Token}})
 	if err != nil {
-		log.Fatal("dial:", err)
+		log.Fatal("dial error:", err)
 	}
 	defer c.Close()
 
 	done := make(chan struct{})
 
-	func() {
+	go func() {
 		defer close(done)
 		for {
 			fmt.Println("reading...")
 			_, message, err := c.ReadMessage()
 			if err != nil {
-				log.Println("err read: ", err)
+				log.Println("read error: ", err)
 				return
 			}
 			var p Payload
-			log.Printf("recv: %s", message)
-			json.Unmarshal(message, &p)
-			fmt.Println(p.Op)
-			if p.Op == 10 {
+			err = json.Unmarshal(message, &p)
+			if err != nil {
+				log.Println("Unmarshal error: ", err)
+				log.Printf("Received Raw Message: %s\n", message)
+				log.Fatal(err)
+			}
+			fmt.Printf("Received Payload: %+v\n", p)
+			switch p.Op {
+			case 10:
 				go sendIdentify(config, c)
 				go sendHeartbeat(p, c)
+			case 7:
+				return
+			case 9:
+				return
 			}
-
 		}
 	}()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
+	for {
+		select {
+		case <-done:
+			return
+		case t := <-ticker.C:
+			//err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
+			log.Println("Ticker: ", t)
+			return
+		case <-interrupt:
+			log.Println("interrupt")
+
+			// Cleanly close the connection by sending a close message and then
+			// waiting (with timeout) for the server to close the connection.
+			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			if err != nil {
+				log.Println("write close:", err)
+				return
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+			}
+			return
+		}
+	}
 }
 func sendIdentify(config Config, c *websocket.Conn) {
 	fmt.Println("Sending Identify")
@@ -108,20 +143,23 @@ func sendIdentify(config Config, c *websocket.Conn) {
 	}
 	err = c.WriteMessage(websocket.TextMessage, []byte(identifyJson))
 	if err != nil {
-		log.Println("error:", err)
+		log.Println("error WriteMessage:", err)
 	}
 	fmt.Println("Sent Identify", string(identifyJson))
 }
 
 func sendHeartbeat(p Payload, c *websocket.Conn) {
+	fmt.Println("Starting Heartbeat Cycle")
 	for {
-		fmt.Println("Sending Heartbeat")
 		fmt.Println("Received opcode10, will send heartbeat after sleeping for", p.D["heartbeat_interval"])
 		time.Sleep(time.Duration(p.D["heartbeat_interval"].(float64)) * time.Millisecond)
-		hb := Heartbeat{op: 1, d: p.S}
-		hbJson, _ := json.Marshal(hb)
-		fmt.Println("received op10, sending: ", hbJson)
-		err := c.WriteMessage(websocket.TextMessage, []byte(hbJson))
+		hb := Heartbeat{Op: 1, D: p.S}
+		hbJson, err := json.Marshal(hb)
+		if err != nil {
+			log.Println("error marshalling:", err)
+		}
+		fmt.Println("Sending heartbeat: ", string(hbJson))
+		err = c.WriteMessage(websocket.TextMessage, []byte(hbJson))
 		if err != nil {
 			log.Println("error:", err)
 		}
