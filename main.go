@@ -1,9 +1,3 @@
-// Copyright 2015 The Gorilla WebSocket Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-// +build ignore
-
 package main
 
 import (
@@ -36,6 +30,16 @@ type Heartbeat struct {
 	d  interface{}
 }
 
+type Identify struct {
+	Op int
+	D  IdentifyData
+}
+
+type IdentifyData struct {
+	Token      string
+	Properties map[string]string
+}
+
 var addr = flag.String("addr", "gateway.discord.gg", "service address")
 
 func main() {
@@ -58,7 +62,7 @@ func main() {
 
 	done := make(chan struct{})
 
-	go func() {
+	func() {
 		defer close(done)
 		for {
 			fmt.Println("reading...")
@@ -79,60 +83,18 @@ func main() {
 		}
 	}()
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-done:
-			return
-			/*	case t := <-ticker.C:
-				err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
-				if err != nil {
-					log.Println("write:", err)
-					return
-				}
-			*/
-		case <-interrupt:
-			log.Println("interrupt")
-
-			// Cleanly close the connection by sending a close message and then
-			// waiting (with timeout) for the server to close the connection.
-			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			if err != nil {
-				log.Println("write close:", err)
-				return
-			}
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-			}
-			return
-		}
-	}
 }
-
-type Identify struct {
-	Op int
-	D  IdentifyData
-}
-
-type IdentifyData struct {
-	token      string
-	properties map[string]string
-}
-
 func sendIdentify(config Config, c *websocket.Conn) {
 	fmt.Println("Sending Identify")
 
-	p := make(map[string]string)
-	p["$os"] = "linux"
-	p["$browser"] = "mybot"
-	p["$device"] = "mybot"
+	properties := make(map[string]string)
+	properties["$os"] = "linux"
+	properties["$browser"] = "mybot"
+	properties["$device"] = "mybot"
 
 	identifyData := IdentifyData{
-		token:      config.Token,
-		properties: p,
+		Token:      config.Token,
+		Properties: properties,
 	}
 
 	identify := Identify{
@@ -152,14 +114,16 @@ func sendIdentify(config Config, c *websocket.Conn) {
 }
 
 func sendHeartbeat(p Payload, c *websocket.Conn) {
-	fmt.Println("Sending Heartbeat")
-	fmt.Println("Received opcode10, will send heartbeat after sleeping for", p.D["heartbeat_interval"])
-	time.Sleep(time.Duration(p.D["heartbeat_interval"].(float64)) * time.Millisecond)
-	hb := Heartbeat{op: 1, d: p.S}
-	hbJson, _ := json.Marshal(hb)
-	fmt.Println("received op10, sending: ", hbJson)
-	err := c.WriteMessage(websocket.TextMessage, []byte(hbJson))
-	if err != nil {
-		log.Println("error:", err)
+	for {
+		fmt.Println("Sending Heartbeat")
+		fmt.Println("Received opcode10, will send heartbeat after sleeping for", p.D["heartbeat_interval"])
+		time.Sleep(time.Duration(p.D["heartbeat_interval"].(float64)) * time.Millisecond)
+		hb := Heartbeat{op: 1, d: p.S}
+		hbJson, _ := json.Marshal(hb)
+		fmt.Println("received op10, sending: ", hbJson)
+		err := c.WriteMessage(websocket.TextMessage, []byte(hbJson))
+		if err != nil {
+			log.Println("error:", err)
+		}
 	}
 }
