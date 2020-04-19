@@ -26,18 +26,18 @@ type Payload struct {
 }
 
 type Heartbeat struct {
-	op int
-	d  interface{}
+	op int         `json:"op"`
+	d  interface{} `json:"d"`
 }
 
 type Identify struct {
-	Op int
-	D  IdentifyData
+	Op int          `json:"op"`
+	D  IdentifyData `json:"d"`
 }
 
 type IdentifyData struct {
-	Token      string
-	Properties map[string]string
+	Token      string            `json:"token"`
+	Properties map[string]string `json:"properties"`
 }
 
 var addr = flag.String("addr", "gateway.discord.gg", "service address")
